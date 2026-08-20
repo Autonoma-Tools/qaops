@@ -1,0 +1,223 @@
+name: Gating Policy
+
+# The enforcement half of gating-policy.yml at the repository root. Every job
+# below maps to one gate class in that file:
+#   blocks_merge  -> a required job with no continue-on-error
+#   blocks_deploy -> a required job the deploy job declares in `needs`
+#   reports_only  -> continue-on-error: true, uploads a report, never blocks
+#
+# The `on` key is quoted so this file parses identically under YAML 1.1
+# loaders (which read a bare `on` as the boolean true) and YAML 1.2 loaders.
+"on":
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: gating-policy-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # BLOCKS MERGE
+  # Fast and deterministic. A red result here means the change is wrong, not
+  # merely suspicious, so nothing in this job is allowed to soft-fail.
+  # Budget: 10 minutes, matching the sum of the blocks_merge budgets in
+  # gating-policy.yml.
+  # ---------------------------------------------------------------------------
+  fast-checks:
+    name: Fast checks (blocks merge)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint and format
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Dependency and CVE audit
+        run: npm audit --audit-level=high
+
+  # ---------------------------------------------------------------------------
+  # BLOCKS DEPLOY
+  # Four flows, one shared setup, budgeted at 4m30s end to end. It answers a
+  # narrower question than "did we break anything": is this build worth testing
+  # further? It gates the deploy job, and only the deploy job.
+  # ---------------------------------------------------------------------------
+  build-verification:
+    name: Build verification suite (blocks deploy)
+    needs: fast-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the build verification suite
+        run: npx playwright test tests/bvt --reporter=line,html
+
+      - name: Upload the build verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-verification-report
+          path: playwright-report
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # REPORTS ONLY
+  # Comprehensive but too slow to gate every merge. continue-on-error keeps a
+  # red result from stopping the pipeline; the uploaded report is the deliverable.
+  # ---------------------------------------------------------------------------
+  full-regression:
+    name: Full regression E2E (reports only)
+    needs: fast-checks
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 45
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Run the full regression suite
+        run: npx playwright test --reporter=line,html
+
+      - name: Upload the regression report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-regression-report
+          path: playwright-report
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # REPORTS ONLY
+  # Pixel diffs need a human, not a gate. The report is the point.
+  # ---------------------------------------------------------------------------
+  visual-regression:
+    name: Visual regression (reports only)
+    needs: fast-checks
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the visual regression suite
+        run: npx playwright test tests/visual --reporter=line,html
+
+      - name: Upload the visual diff report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-regression-report
+          path: playwright-report
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # DEPLOY
+  # Gated behind build-verification, and behind main. The reports-only jobs are
+  # deliberately absent from `needs`: a red visual diff must not hold a deploy.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy
+    needs: build-verification
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://example.com
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy
+        run: npm run deploy
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}

@@ -1,0 +1,17 @@
+# One override record. Five fields, all required, no exceptions:
+# drop any one of them and this stops being a record and becomes a bypass
+# with a timestamp.
+#
+# `check` must match a check name in gating-policy.yml.
+
+check: performance-budget
+requested_by: r.okafor (release captain, on call 2026-08-17 to 2026-08-23)
+reason: >-
+  Lighthouse largest-contentful-paint regressed from 2.1s to 2.6s against a
+  budget of 2.5s. The regression traces to the vendored charting bundle loading
+  eagerly on the dashboard route, not to this change, which only touches the
+  billing settings form. Confirmed by re-running the budget against main at the
+  same commit depth, where it reports 2.6s as well. Shipping this deploy does
+  not make the measured regression worse.
+follow_up_issue: https://github.com/Autonoma-Tools/qaops/issues/42
+expires_on: 2026-12-31

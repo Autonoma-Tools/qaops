@@ -1,0 +1,10 @@
+# A deliberately invalid override record, kept out of overrides/ so it never
+# fails the repository's own CI. Two defects: no follow_up_issue, and an
+# expires_on that has already passed.
+#
+# Run: node scripts/validate-override.js examples
+
+check: full-regression-e2e
+requested_by: someone in a Slack thread
+reason: seems fine
+expires_on: 2024-01-15

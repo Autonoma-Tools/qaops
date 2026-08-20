@@ -1,0 +1,135 @@
+# Gating policy: the human-readable source of truth for what this pipeline is
+# allowed to stop.
+#
+# One rule underneath every classification below: block on checks that are fast,
+# deterministic, and whose failure means the change is wrong; report on checks
+# that are slow, flaky, or whose failure means the change is merely suspicious.
+#
+# gate values:
+#   blocks_merge  - a red result stops the pull request from merging
+#   blocks_deploy - a red result stops the deploy, not the merge
+#   reports_only  - a red result is a signal for a human, and stops nothing
+#
+# budget_seconds is a wall-clock ceiling, not an average. A check that routinely
+# exceeds its budget is a policy problem, not a patience problem.
+
+version: 1
+owner: platform-quality
+last_reviewed: 2026-08-20
+
+checks:
+  # --- blocks_merge -------------------------------------------------------
+  - name: lint-and-format
+    gate: blocks_merge
+    owner: platform-quality
+    budget_seconds: 60
+    why: Fails fast and deterministically; a red result is never ambiguous.
+
+  - name: type-check
+    gate: blocks_merge
+    owner: platform-quality
+    budget_seconds: 90
+    why: A type error is a defect, not a suggestion, and it is cheap to catch.
+
+  - name: unit-tests
+    gate: blocks_merge
+    owner: application-teams
+    budget_seconds: 180
+    why: Deterministic, and isolates the exact break rather than hinting at it.
+
+  - name: build
+    gate: blocks_merge
+    owner: platform-quality
+    budget_seconds: 240
+    why: Unmergeable code is not a judgment call.
+
+  - name: secret-scanning
+    gate: blocks_merge
+    owner: security
+    budget_seconds: 45
+    why: A leaked credential is never marginal.
+
+  - name: contract-tests
+    gate: blocks_merge
+    owner: api-platform
+    budget_seconds: 120
+    why: A schema break is deterministic and cheap to detect at this layer.
+
+  - name: dependency-cve-audit
+    gate: blocks_merge
+    owner: security
+    budget_seconds: 60
+    why: A known-bad version is a fact, not an interpretation.
+
+  # --- blocks_deploy ------------------------------------------------------
+  - name: build-verification-suite
+    gate: blocks_deploy
+    owner: quality-engineering
+    budget_seconds: 270
+    why: >-
+      Four flows plus one shared setup step, budgeted at four and a half minutes.
+      Confirms this build is worth testing further. Needs a real build and a real
+      environment, so it cannot sit on the merge gate.
+
+  - name: performance-budget
+    gate: blocks_deploy
+    owner: web-performance
+    budget_seconds: 420
+    why: A performance regression should not reach users, but it needs a build to measure.
+
+  # --- reports_only -------------------------------------------------------
+  - name: unit-coverage-delta
+    gate: reports_only
+    owner: application-teams
+    budget_seconds: 20
+    why: A drop is a signal, not proof that the change is wrong.
+
+  - name: full-regression-e2e
+    gate: reports_only
+    owner: quality-engineering
+    budget_seconds: 1800
+    why: >-
+      Comprehensive, and far too slow to gate every merge. Promote to
+      blocks_deploy only once its failures are reliably about the product.
+
+  - name: visual-regression
+    gate: reports_only
+    owner: design-systems
+    budget_seconds: 600
+    why: Pixel diffs need a human reviewer, not a gate.
+
+  - name: accessibility-scan
+    gate: reports_only
+    owner: design-systems
+    budget_seconds: 300
+    why: Flags candidates worth reviewing; false positives are common.
+
+  - name: load-test
+    gate: reports_only
+    owner: platform-quality
+    budget_seconds: 1800
+    why: Too slow and too costly to run per commit.
+
+  - name: bundle-size
+    gate: reports_only
+    owner: web-performance
+    budget_seconds: 45
+    why: Worth tracking on every pull request, rarely worth blocking on alone.
+
+# Every gate needs a documented escape hatch, or it quietly becomes a
+# suggestion. Records live in overrides/ and are validated by
+# scripts/validate-override.js in CI.
+overrides:
+  directory: overrides
+  approver_role: release-captain
+  required_fields:
+    - check
+    - requested_by
+    - reason
+    - follow_up_issue
+    - expires_on
+  review_cadence: monthly
+  review_rule: >-
+    A check overridden more than twice in a review window is misclassified.
+    Move it to a lower gate or fix what makes it fail for reasons unrelated to
+    the product. The log should shrink over time, not grow.

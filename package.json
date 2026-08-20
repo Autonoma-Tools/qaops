@@ -1,0 +1,15 @@
+{
+  "name": "qaops",
+  "version": "0.1.0",
+  "description": "A GitHub Actions gating policy: which checks block merge, which block deploy, and which only report.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "validate:overrides": "node scripts/validate-override.js overrides"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}
