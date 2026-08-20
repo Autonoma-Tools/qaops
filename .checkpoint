@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "slug": "qaops",
+  "step": "created",
+  "completed_specs": [],
+  "pending_specs": ["gating-policy-workflow", "gating-policy-yaml", "override-record-template", "override-record-validator"],
+  "created_at": "2026-08-20T12:19:48Z",
+  "updated_at": "2026-08-20T12:19:48Z"
+}
